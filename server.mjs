@@ -1,5 +1,6 @@
 
 import {createServer} from 'node:http';
+import {Readable,Writable} from 'node:stream';
 import {createReadStream,existsSync,statSync} from 'node:fs';
 import {join,extname,resolve} from 'node:path';
 import {userFor,get,run,atomic,audit,can,documentAccess,fixtureDXF,fixturePDF,limit,findContent,secret,hash,stamp} from './lib/db.mjs';
@@ -50,7 +51,7 @@ const acknowledge=(l,number,topic,user)=>{
  const isApp=topic==='app',t=(a,b)=>txt(l,a,b),heading=isApp?t('Bewerbung erfasst','Application received'):t('Anfrage eingegangen','Inquiry received'),description=isApp?t('Ihre Bewerbung wurde gespeichert.','Your application was saved.'):t('Ihre Anfrage ist im Administrationsbereich eingegangen. Das Team kann sie dort prüfen und sich unter den angegebenen Kontaktdaten bei Ihnen melden.','Your inquiry has reached the administration inbox. The team can review it there and contact you using the details you provided.');
  return {heading,body:screen(l,'KLAUS / VORGANG',heading,description)+'<section class="section slim"><div class="wrap"><div class="panel formshell"><p class="micro">'+t('Vorgangsnummer','Reference number')+'</p><p class="receipt-number">'+esc(number)+'</p><div class="actions">'+btn('/'+l,t('Zur Startseite','Back to home'),'ghost')+(user?.role==='customer'?btn('/'+l+'/portal/anfragen',t('Meine Anfragen','My inquiries')):'')+'</div></div></div></section>'};
 };
-const server=createServer(cloudflareRuntime?{requestTimeout:20000,headersTimeout:10000}:{requestTimeout:20000,headersTimeout:10000,maxHeaderSize:8192},async(req,res)=>{
+async function handleNodeRequest(req,res){
  standard(res);
  let l='de',path='',user=null,pathname='/';
  const html=(page,status=200,privatePage=false)=>{const threeD=JSON.parse(get("SELECT value FROM settings WHERE key='threeDEnabled'")?.value??'true');const cls=[page.cls,!threeD?'no-3d':''].filter(Boolean).join(' ');let output=layout({l,path,user,privatePage,...page,cls});if(cls.split(/\s+/).includes('maintenance'))output=output.replace(/<header class="top">[\s\S]*?<\/header>/,'').replace(/<footer>[\s\S]*?<\/footer>/,'');return send(res,status,'text/html; charset=utf-8',output);};
@@ -262,8 +263,24 @@ const server=createServer(cloudflareRuntime?{requestTimeout:20000,headersTimeout
   const back=path.startsWith('/bewerbung/')||path==='/anfrage'?'/'+l+path:'/'+l;
   return html({heading:String(status),body:screen(l,'KLAUS / LOCAL DEMO',String(status),message,'<div class="actions">'+btn(back,txt(l,'Zurück','Go back'),'ghost')+'</div>')},status,true);
  }
-});
+}
+const server=createServer(cloudflareRuntime?{requestTimeout:20000,headersTimeout:10000}:{requestTimeout:20000,headersTimeout:10000,maxHeaderSize:8192},handleNodeRequest);
+class WorkerResponse extends Writable{
+ constructor(){super();this.statusCode=200;this.headers=new Headers();this.chunks=[];this.sent=false;}
+ _write(chunk,encoding,callback){this.chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk,encoding));callback();}
+ setHeader(name,value){this.headers.set(name,Array.isArray(value)?value.join(', '):String(value));return this;}
+ writeHead(status,headers={}){this.statusCode=status;for(const [name,value] of Object.entries(headers))this.setHeader(name,value);this.sent=true;return this;}
+ get headersSent(){return this.sent;}
+}
+export async function handleCloudflareRequest(request){
+ const url=new URL(request.url),headers={};request.headers.forEach((value,name)=>headers[name.toLowerCase()]=value);
+ const body=request.body?Readable.from((async function*(){const reader=request.body.getReader();try{while(true){const {done,value}=await reader.read();if(done)break;yield Buffer.from(value);}}finally{reader.releaseLock();}})()):Readable.from([]);
+ const req=Object.assign(body,{method:request.method,url:url.pathname+url.search,headers,socket:{remoteAddress:headers['cf-connecting-ip']||'cloudflare'}});
+ const res=new WorkerResponse(),finished=new Promise(resolve=>res.once('finish',resolve));
+ await handleNodeRequest(req,res);
+ if(!res.writableFinished)await finished;
+ return new Response(Buffer.concat(res.chunks),{status:res.statusCode,headers:res.headers});
+}
 if(!cloudflareRuntime)server.maxConnections=32;
-if(cloudflareRuntime)server.listen(port);
-else server.listen(port,host,()=>console.log('KLAUS · Local website: http://'+host+':'+port+'/de'));
+if(!cloudflareRuntime)server.listen(port,host,()=>console.log('KLAUS · Local website: http://'+host+':'+port+'/de'));
 

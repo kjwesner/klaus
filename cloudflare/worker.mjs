@@ -1,8 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
-import { handleAsNodeRequest } from 'cloudflare:node';
 import { schemaSql } from './schema.mjs';
 
-const serverPort = 4173;
 const isPublicAsset = path => /^\/(?:media|vendor)\/[a-z0-9._-]+$/i.test(path)
   || ['/style.css', '/site.js', '/viewer.js', '/access.js', '/blueprint.svg'].includes(path);
 
@@ -42,7 +40,8 @@ export class KlausApplication extends DurableObject {
       globalThis.__KLAUS_SCHEMA = schemaSql;
       globalThis.__KLAUS_DB = this.sqlite;
       globalThis.__KLAUS_ATOMIC = callback => this.atomicContext.storage.transactionSync(callback);
-      await import('../server.mjs');
+      const server = await import('../server.mjs');
+      this.handleRequest = server.handleCloudflareRequest;
     });
   }
 
@@ -50,7 +49,7 @@ export class KlausApplication extends DurableObject {
     await this.ready;
     this.sqlite.rebind(this.ctx.storage.sql);
     this.atomicContext = this.ctx;
-    return handleAsNodeRequest(serverPort, request);
+    return this.handleRequest(request);
   }
 }
 
