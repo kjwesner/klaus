@@ -263,7 +263,7 @@ const server=createServer(cloudflareRuntime?{requestTimeout:20000,headersTimeout
   return html({heading:String(status),body:screen(l,'KLAUS / LOCAL DEMO',String(status),message,'<div class="actions">'+btn(back,txt(l,'Zurück','Go back'),'ghost')+'</div>')},status,true);
  }
 });
-server.maxConnections=32;
+if(!cloudflareRuntime)server.maxConnections=32;
 if(cloudflareRuntime)server.listen(port);
 else server.listen(port,host,()=>console.log('KLAUS · Local website: http://'+host+':'+port+'/de'));
 
