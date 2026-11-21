@@ -8,6 +8,9 @@ const isPublicAsset = path => /^\/(?:media|vendor)\/[a-z0-9._-]+$/i.test(path)
 
 function sqliteAdapter(sql) {
   return {
+    rebind(nextSql) {
+      sql = nextSql;
+    },
     exec(statement) {
       return sql.exec(statement);
     },
@@ -31,17 +34,22 @@ function sqliteAdapter(sql) {
 export class KlausApplication extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.sql = ctx.storage.sql;
+    this.sqlite = sqliteAdapter(this.sql);
+    this.atomicContext = ctx;
     this.ready = ctx.blockConcurrencyWhile(async () => {
       globalThis.__KLAUS_CLOUDFLARE__ = true;
       globalThis.__KLAUS_SCHEMA = schemaSql;
-      globalThis.__KLAUS_DB = sqliteAdapter(ctx.storage.sql);
-      globalThis.__KLAUS_ATOMIC = callback => ctx.storage.transactionSync(callback);
+      globalThis.__KLAUS_DB = this.sqlite;
+      globalThis.__KLAUS_ATOMIC = callback => this.atomicContext.storage.transactionSync(callback);
       await import('../server.mjs');
     });
   }
 
   async fetch(request) {
     await this.ready;
+    this.sqlite.rebind(this.ctx.storage.sql);
+    this.atomicContext = this.ctx;
     return handleAsNodeRequest(serverPort, request);
   }
 }
