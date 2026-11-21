@@ -2,7 +2,7 @@
 import {createServer} from 'node:http';
 import {createReadStream,existsSync,statSync} from 'node:fs';
 import {join,extname,resolve} from 'node:path';
-import {userFor,get,run,atomic,audit,can,documentAccess,fixtureDXF,fixturePDF,limit,findContent} from './lib/db.mjs';
+import {userFor,get,run,atomic,audit,can,documentAccess,fixtureDXF,fixturePDF,limit,findContent,secret,hash,stamp} from './lib/db.mjs';
 import {action,submitInquiry,submitApplication} from './lib/actions.mjs';
 import {home,listing,detail,contact,legal,inquiry,application} from './lib/public.mjs';
 import {account,consolePage} from './lib/console.mjs';
@@ -14,6 +14,7 @@ const port=Number(process.env.PORT||4173),host='127.0.0.1';
 if(!Number.isInteger(port)||port<1024||port>65535)throw Error('PORT must be between 1024 and 65535');
 const hostname=new Set(['127.0.0.1:'+port,'localhost:'+port]);
 const assetDir=resolve('public');
+run('CREATE TABLE IF NOT EXISTS access_sessions(token_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL)');
 const contentTypes={'.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.webp':'image/webp','.png':'image/png','.woff2':'font/woff2','.txt':'text/plain; charset=utf-8'};
 const listKinds={leistungen:'service',maschinenpark:'machine',projekte:'reference',karriere:'job'};
 const standard=(res)=>{
@@ -40,6 +41,8 @@ const document=(res,record,inline=false)=>{
  return send(res,200,record.mime,record.body);
 };
 const cookie=(value,age)=>'klaus_session='+value+'; HttpOnly; SameSite=Strict; Path=/; Max-Age='+age;
+const accessCookie=(value,age)=>'site_access='+value+'; HttpOnly; SameSite=Strict; Path=/; Max-Age='+age;
+const accessPage=(message='')=>'<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Zugang</title><style>*{box-sizing:border-box}html{height:100%}body{min-height:100vh;min-height:100dvh;margin:0;display:grid;place-items:center;background:#f4f4f2;color:#20211f;font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}.access{width:min(100% - 32px,420px);padding:34px;background:#fff;border:1px solid #e4e4e0;border-radius:12px;box-shadow:0 12px 40px #0000000b}.access h1{margin:0 0 8px;font-size:22px;font-weight:600;letter-spacing:-.025em}.access p{margin:0;color:#64645f}.digits{display:flex;justify-content:center;gap:12px;margin-top:26px}.digits input{width:58px;min-width:0;height:64px;border:1px solid #c9c9c3;border-radius:8px;background:#fff;color:#171715;text-align:center;font:600 26px/1 system-ui,sans-serif;outline:none}.digits input:focus{border-color:#64645f;box-shadow:0 0 0 3px #20211f12}.error{min-height:24px;margin-top:12px!important;color:#9c2929!important;font-size:14px}</style></head><body><main class="access"><h1>Zugang</h1><p>Bitte Zugangscode eingeben.</p><form id="access-form" method="post" action="/zugang"><div class="digits" aria-label="Vierstelliger Zugangscode">'+[1,2,3,4].map(n=>'<input name="digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="'+(n===1?'one-time-code':'off')+'" aria-label="Ziffer '+n+'" required '+(n===1?'autofocus':'')+'>').join('')+'</div><p class="error" role="status" aria-live="polite">'+esc(message)+'</p><noscript><button type="submit">Weiter</button></noscript></form></main><script src="/access.js" defer></script></body></html>';
 const acknowledge=(l,number,topic,user)=>{
  const isApp=topic==='app',t=(a,b)=>txt(l,a,b),heading=isApp?t('Bewerbung erfasst','Application received'):t('Anfrage eingegangen','Inquiry received'),description=isApp?t('Ihre Bewerbung wurde gespeichert.','Your application was saved.'):t('Ihre Anfrage ist im Administrationsbereich eingegangen. Das Team kann sie dort prüfen und sich unter den angegebenen Kontaktdaten bei Ihnen melden.','Your inquiry has reached the administration inbox. The team can review it there and contact you using the details you provided.');
  return {heading,body:screen(l,'KLAUS / VORGANG',heading,description)+'<section class="section slim"><div class="wrap"><div class="panel formshell"><p class="micro">'+t('Vorgangsnummer','Reference number')+'</p><p class="receipt-number">'+esc(number)+'</p><div class="actions">'+btn('/'+l,t('Zur Startseite','Back to home'),'ghost')+(user?.role==='customer'?btn('/'+l+'/portal/anfragen',t('Meine Anfragen','My inquiries')):'')+'</div></div></div></section>'};
@@ -59,7 +62,7 @@ const server=createServer({requestTimeout:20000,headersTimeout:10000,maxHeaderSi
   }
   if(pathname==='/robots.txt')return send(res,200,'text/plain; charset=utf-8','User-agent: *\nDisallow: /\n');
   if(pathname==='/sitemap.xml')return send(res,200,'application/xml; charset=utf-8','<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>');
-  if(req.method==='GET'&&(/^\/(media|vendor)\/[a-z0-9._-]+$/i.test(pathname)||['/style.css','/site.js','/viewer.js','/blueprint.svg'].includes(pathname))){
+  if(req.method==='GET'&&(/^\/(media|vendor)\/[a-z0-9._-]+$/i.test(pathname)||['/style.css','/site.js','/viewer.js','/access.js','/blueprint.svg'].includes(pathname))){
    if(pathname.includes('..'))gone();
    let file=join(assetDir,pathname.slice(1));
    if(!existsSync(file)&&/^\/media\/(?:cnc|turning|series)\.webp$/.test(pathname)){
@@ -68,6 +71,32 @@ const server=createServer({requestTimeout:20000,headersTimeout:10000,maxHeaderSi
    }
    if(!existsSync(file)||!contentTypes[extname(file)])gone();
    res.writeHead(200,{'Content-Type':contentTypes[extname(file)],'Content-Length':statSync(file).size,'Cache-Control':'public, max-age=3600'});return createReadStream(file).pipe(res);
+  }
+  if(pathname==='/zugang'){
+   const currentToken=req.headers.cookie?.match(/(?:^|; )site_access=([A-Za-z0-9_-]{43})(?:;|$)/)?.[1];
+   const hasAccess=currentToken&&get('SELECT 1 ok FROM access_sessions WHERE token_hash=? AND expires>?',hash(currentToken),stamp());
+   if(req.method==='GET')return hasAccess?redirect(res,'/de'):send(res,200,'text/html; charset=utf-8',accessPage());
+   if(req.method==='POST'){
+    if(req.headers.origin!=='http://'+req.headers.host||req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'Ungültige Anfragequelle / Invalid request origin');
+    const ip=req.socket.remoteAddress;
+    const chunks=[];let size=0;
+    for await(const chunk of req){size+=chunk.length;if(size>1024)throw new HttpError(413,'Anfrage ist zu groß / Request too large');chunks.push(chunk);}
+    const form=new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+    const code=form.getAll('digit').join('');
+    if(code!=='1964'){
+     if(!limit('access:'+ip,8,900))return send(res,429,'text/html; charset=utf-8',accessPage('Bitte warten Sie kurz und versuchen Sie es erneut.'));
+     return send(res,200,'text/html; charset=utf-8',accessPage('Der Code ist nicht korrekt.'));
+    }
+    const token=secret(),expires=stamp()+31536000;
+    run('DELETE FROM access_sessions WHERE expires<=?',stamp());
+    run('INSERT INTO access_sessions(token_hash,expires) VALUES(?,?)',hash(token),expires);
+    res.setHeader('Set-Cookie',accessCookie(token,31536000));return redirect(res,'/de');
+   }
+   return send(res,405,'text/plain; charset=utf-8','Method not allowed');
+  }
+  const accessToken=req.headers.cookie?.match(/(?:^|; )site_access=([A-Za-z0-9_-]{43})(?:;|$)/)?.[1];
+  if(!accessToken||!get('SELECT 1 ok FROM access_sessions WHERE token_hash=? AND expires>?',hash(accessToken),stamp())){
+   return redirect(res,'/zugang');
   }
   if(req.method==='GET'&&pathname==='/fixtures/demo.pdf')return document(res,{name:'demo-zeichnung.pdf',body:fixturePDF,mime:'application/pdf'});
   if(req.method==='GET'&&pathname==='/fixtures/demo.dxf')return document(res,{name:'demo-linien.dxf',body:fixtureDXF,mime:'application/octet-stream'});
