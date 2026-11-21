@@ -9,7 +9,8 @@ import {account,consolePage} from './lib/console.mjs';
 import {layout,screen,txt,btn,esc,local} from './lib/ui.mjs';
 import {formData,HttpError,emailAddress} from './lib/upload.mjs';
 
-if(process.env.APP_MODE&&process.env.APP_MODE!=='local'){throw new Error('This application is configured for local operation only');}
+const cloudflareRuntime=Boolean(globalThis.__KLAUS_CLOUDFLARE__);
+if(process.env.APP_MODE&&process.env.APP_MODE!=='local'&&!cloudflareRuntime){throw new Error('This application is configured for local operation only');}
 const port=Number(process.env.PORT||4173),host='127.0.0.1';
 if(!Number.isInteger(port)||port<1024||port>65535)throw Error('PORT must be between 1024 and 65535');
 const hostname=new Set(['127.0.0.1:'+port,'localhost:'+port]);
@@ -40,8 +41,10 @@ const document=(res,record,inline=false)=>{
  res.setHeader('Content-Length',record.body.length);
  return send(res,200,record.mime,record.body);
 };
-const cookie=(value,age)=>'klaus_session='+value+'; HttpOnly; SameSite=Strict; Path=/; Max-Age='+age;
-const accessCookie=(value,age)=>'site_access='+value+'; HttpOnly; SameSite=Strict; Path=/; Max-Age='+age;
+const secureCookie=cloudflareRuntime?' Secure':'';
+const cookie=(value,age)=>'klaus_session='+value+'; HttpOnly; SameSite=Strict; Path=/; Max-Age='+age+secureCookie;
+const accessCookie=(value,age)=>'site_access='+value+'; HttpOnly; SameSite=Strict; Path=/; Max-Age='+age+secureCookie;
+const sameOrigin=req=>{try{const origin=new URL(req.headers.origin);return ['http:','https:'].includes(origin.protocol)&&origin.host===req.headers.host;}catch{return false;}};
 const accessPage=(message='')=>'<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Zugang</title><style>*{box-sizing:border-box}html{height:100%}body{min-height:100vh;min-height:100dvh;margin:0;display:grid;place-items:center;background:#f4f4f2;color:#20211f;font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}.access{width:min(100% - 32px,420px);padding:34px;background:#fff;border:1px solid #e4e4e0;border-radius:12px;box-shadow:0 12px 40px #0000000b}.access h1{margin:0 0 8px;font-size:22px;font-weight:600;letter-spacing:-.025em}.access p{margin:0;color:#64645f}.digits{display:flex;justify-content:center;gap:12px;margin-top:26px}.digits input{width:58px;min-width:0;height:64px;border:1px solid #c9c9c3;border-radius:8px;background:#fff;color:#171715;text-align:center;font:600 26px/1 system-ui,sans-serif;outline:none}.digits input:focus{border-color:#64645f;box-shadow:0 0 0 3px #20211f12}.error{min-height:24px;margin-top:12px!important;color:#9c2929!important;font-size:14px}</style></head><body><main class="access"><h1>Zugang</h1><p>Bitte Zugangscode eingeben.</p><form id="access-form" method="post" action="/zugang"><div class="digits" aria-label="Vierstelliger Zugangscode">'+[1,2,3,4].map(n=>'<input name="digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="'+(n===1?'one-time-code':'off')+'" aria-label="Ziffer '+n+'" required '+(n===1?'autofocus':'')+'>').join('')+'</div><p class="error" role="status" aria-live="polite">'+esc(message)+'</p><noscript><button type="submit">Weiter</button></noscript></form></main><script src="/access.js" defer></script></body></html>';
 const acknowledge=(l,number,topic,user)=>{
  const isApp=topic==='app',t=(a,b)=>txt(l,a,b),heading=isApp?t('Bewerbung erfasst','Application received'):t('Anfrage eingegangen','Inquiry received'),description=isApp?t('Ihre Bewerbung wurde gespeichert.','Your application was saved.'):t('Ihre Anfrage ist im Administrationsbereich eingegangen. Das Team kann sie dort prüfen und sich unter den angegebenen Kontaktdaten bei Ihnen melden.','Your inquiry has reached the administration inbox. The team can review it there and contact you using the details you provided.');
@@ -52,7 +55,7 @@ const server=createServer({requestTimeout:20000,headersTimeout:10000,maxHeaderSi
  let l='de',path='',user=null,pathname='/';
  const html=(page,status=200,privatePage=false)=>{const threeD=JSON.parse(get("SELECT value FROM settings WHERE key='threeDEnabled'")?.value??'true');const cls=[page.cls,!threeD?'no-3d':''].filter(Boolean).join(' ');let output=layout({l,path,user,privatePage,...page,cls});if(cls.split(/\s+/).includes('maintenance'))output=output.replace(/<header class="top">[\s\S]*?<\/header>/,'').replace(/<footer>[\s\S]*?<\/footer>/,'');return send(res,status,'text/html; charset=utf-8',output);};
  try{
-  if(!hostname.has(req.headers.host))return send(res,421,'text/plain','Local website only');
+  if(!cloudflareRuntime&&!hostname.has(req.headers.host))return send(res,421,'text/plain','Local website only');
   const parsed=new URL(req.url,'http://'+req.headers.host);
   if(parsed.origin!=='http://'+req.headers.host)throw new HttpError(400,'Invalid request target');
   pathname=parsed.pathname.replace(/\/+$/,'')||'/';
@@ -77,8 +80,8 @@ const server=createServer({requestTimeout:20000,headersTimeout:10000,maxHeaderSi
    const hasAccess=currentToken&&get('SELECT 1 ok FROM access_sessions WHERE token_hash=? AND expires>?',hash(currentToken),stamp());
    if(req.method==='GET')return hasAccess?redirect(res,'/de'):send(res,200,'text/html; charset=utf-8',accessPage());
    if(req.method==='POST'){
-    if(req.headers.origin!=='http://'+req.headers.host||req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'Ungültige Anfragequelle / Invalid request origin');
-    const ip=req.socket.remoteAddress;
+    if(!sameOrigin(req)||req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'Ungültige Anfragequelle / Invalid request origin');
+    const ip=cloudflareRuntime?(req.headers['cf-connecting-ip']||'cloudflare'):req.socket.remoteAddress;
     const chunks=[];let size=0;
     for await(const chunk of req){size+=chunk.length;if(size>1024)throw new HttpError(413,'Anfrage ist zu groß / Request too large');chunks.push(chunk);}
     const form=new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
@@ -134,8 +137,8 @@ const server=createServer({requestTimeout:20000,headersTimeout:10000,maxHeaderSi
    }
   }
   if(req.method==='POST'){
-   if(req.headers.origin!=='http://'+req.headers.host||req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'Ungültige Anfragequelle / Invalid request origin');
-   const ip=req.socket.remoteAddress;
+   if(!sameOrigin(req)||req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'Ungültige Anfragequelle / Invalid request origin');
+   const ip=cloudflareRuntime?(req.headers['cf-connecting-ip']||'cloudflare'):req.socket.remoteAddress;
    if(!limit('post:'+ip,120,600))throw new HttpError(429,'Zu viele Anfragen / Too many requests');
    if(section==='ki'&&!a){
     if(!limit('ai:'+ip,12,60))return sendJson(res,429,{error:txt(l,'Zu viele Nachrichten. Bitte kurz warten.','Too many messages. Please wait a moment.')});
@@ -261,5 +264,6 @@ const server=createServer({requestTimeout:20000,headersTimeout:10000,maxHeaderSi
  }
 });
 server.maxConnections=32;
-server.listen(port,host,()=>console.log('KLAUS · Local website: http://'+host+':'+port+'/de'));
+if(cloudflareRuntime)server.listen(port);
+else server.listen(port,host,()=>console.log('KLAUS · Local website: http://'+host+':'+port+'/de'));
 
