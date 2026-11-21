@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "klaus-maschinenbau",
   "main": "cloudflare/worker.mjs",
-  "compatibility_date": "2026-11-22",
+  "compatibility_date": "2026-11-21",
   "compatibility_flags": [
     "nodejs_compat",
     "enable_nodejs_http_server_modules"
