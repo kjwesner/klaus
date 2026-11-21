@@ -1,0 +1,25 @@
+
+# Lokaler Betrieb und offene Freigaben
+
+Die Anwendung läuft lokal und speichert echte Anfrage- und CMS-Datensätze dauerhaft in SQLite. Der Webserver bindet ausschließlich an 127.0.0.1; damit ist die Website nicht öffentlich erreichbar. Vor einem Internetbetrieb müssen Hosting, TLS, Produktionsdatenbank, Datei-Scan, E-Mail-Zustellung, Datenschutz, Backups und Sicherheitsprüfung eingerichtet sein.
+
+| Thema | In der Demo | Für einen Produktionsauftrag |
+|---|---|---|
+| Authentifizierung | Erstadministrator wird beim ersten Aufruf angelegt. Echte Konten werden mit Passwort über die Verwaltung angelegt. Scrypt, gehashte Sitzungstokens, HttpOnly/SameSite-Cookies, Anmelderatenbegrenzung und Audit-Protokoll. | Passwortloses Demo-Login entfernen. TLS und Secure-Cookies erzwingen; externer oder geprüfter Identity Provider mit produktiver Mailverifikation, Reset, optionalem MFA und administrativem Sitzungsentzug. |
+| Rechte und Mandanten | Serverseitige Rollen und Besitzprüfung. Dokumente liegen außerhalb der Webassets; Downloads werden pro Objekt geprüft. Rollen: Admin, Redaktion, Vertrieb, Projektmanagement, Personal, Kunde. | Rollenmatrix mit KLAUS abgleichen. Firmen- und Mehrbenutzermandanten, organisatorische Delegation und zusätzliche Datenschutzgrenzen umsetzen. |
+| Upload | Formatprüfung, max. 3 × 5 MB; unbekannte Testdateien ohne ClamAV abgelehnt. Bei ClamAV werden Dateien per INSTREAM geprüft, bevor sie gespeichert werden. Eigene unveränderte Fixtures sind per SHA-256 freigegeben. Demo-PDF erhält eine geschützte Inline-Vorschau. | Isolierter Scanner mit Signaturupdates, Quarantäne, Re-Scanning und sichere Konvertierung. S3-kompatibler privater Bucket mit kurzlebigen Download-URLs nach Prüfung der Berechtigung. |
+| Datenbank | SQLite für einen einzelnen lokalen Prozess, Migration, lokal gespeicherte Dokumente, Status, Revisionen und Audit. | PostgreSQL als separates Produktionssystem mit Migration, Backup, Verschlüsselung und Wiederherstellungstests. Lokale Datenbank vor dem Produktivbetrieb migrieren. |
+| Benachrichtigungen | Anfrage, Bewerbung, Einladung, Reset und Mitarbeiterupdates erzeugen Einträge in `outbox`. Kein Provider und kein Versand. | Derzeit werden RFQ-Meldungen und Reset-Links im lokalen Postausgang gespeichert; es erfolgt kein automatischer E-Mail-Versand. Für Internetbetrieb SMTP-/Mail-Provider, verifizierte Absenderdomain und Versandprotokoll anbinden. |
+| CAD | Browser liest unterstützte ASCII-DXF-Linienelemente lokal und markiert die Darstellung als unvollständig. STEP/STP/IGES können mit Scanner als Dokumente gespeichert werden. | Quarantänisierte Modellkonvertierung in einem isolierten Prozess: Eingang als geprüfte Dokument-ID mit Format, Hash und Produktmandant; Ausgänge `pending`, `unsupported`, `failed`, `ready` plus private GLB-Datei. Timeouts, Ressourcenlimits und erneute Objektprüfung beim Laden. Keine Simulation als Originalvorschau. |
+| Löschung | HR kann Demo-Bewerbungen und Anlagen löschen; lokales Bereinigungsskript für abgelaufene Bewerbungen und Postausgang. Demo-Reset verwirft alle Daten. | Fristen, Rechtsgrundlagen, Betroffenenrechte, Aufbewahrungsregeln, Backups und Löschjobs mit verantwortlichen Personen prüfen. |
+| Inhalt und Medien | Geprüfte Webseitenangaben, verlinkte Originalquellen, zweisprachige Konzepttexte und selbst erzeugte schematische Medien. | Inventar, Zertifikate, Stellen und Ansprechpartner aktuell bestätigen; Originalmaterial und Referenzen zur Veröffentlichung freigeben lassen; Übersetzungen prüfen. Editorial Workflow, Legal/Cookie-Texte und Medienbibliothek je nach Produktionserfordernissen ausbauen. |
+| SEO und Betrieb | Absichtliches Noindex; Robots sperrt alles, Sitemap ist leer. Strukturierte Angaben und Sprachalternativen sind in der Demo vorhanden. Keine Drittanbieter-Tracker. | Erst nach Freigabe absolute Metadaten und Sitemap hinterlegen. Barrierefreiheitsprüfung, gemessene Core Web Vitals auf echten Geräten, Monitoring, Backups und unabhängigen Sicherheitstest durchführen. |
+
+## Optionale Virenprüfung
+
+ClamAV/clamd in einer separaten, nur lokal erreichbaren Umgebung betreiben. Sicherstellen, dass INSTREAM über TCP aktiv ist und der konfigurierte StreamMaxLength über dem Dateilimit von 5 MiB liegt. Dann in `.env` z. B. `CLAMD_HOST=127.0.0.1` und `CLAMD_PORT=3310` setzen und die Demo neu starten. Projekt- und Bewerbungsdateien werden ohne Scanner oder bei Scanfehler abgelehnt. Admin-Bilder sind auf PNG, JPEG und WebP begrenzt; SVG/aktive Formate werden nicht angenommen. Der Testbetrieb ohne ClamAV ist automatisiert geprüft; ein realer ClamAV-Dienst war in dieser Vorführung nicht verbunden.
+
+## Grenzen der Vorführung
+
+Die CNC-Aufnahme ist eine statische Konzeptvisualisierung mit Scrollbewegung, ergänzt durch separate interaktive 3D-Modelle. Es gibt keine authentische 3D-Digitalisierung des tatsächlichen Maschinenparks. Die Standortskizze öffnet OpenStreetMap erst nach Klick. Produktionsintegrationen, Video-CMS, externe Karteneinbindung, ausführliche Einwilligungsverwaltung, MFA und vollständige CAD-Konvertierung sind nicht aktiv und werden von der Demo nicht vorgetäuscht.
+

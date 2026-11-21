@@ -1,0 +1,19 @@
+{
+  "name": "klaus-precision-in-motion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env server.mjs",
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "test": "node --test",
+    "reset": "node --env-file-if-exists=.env scripts/reset.mjs",
+    "purge": "node --env-file-if-exists=.env scripts/purge.mjs"
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.5.438"
+  }
+}
