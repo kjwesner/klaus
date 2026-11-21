@@ -3,7 +3,7 @@ import {createServer} from 'node:http';
 import {Readable,Writable} from 'node:stream';
 import {createReadStream,existsSync,statSync} from 'node:fs';
 import {join,extname,resolve} from 'node:path';
-import {userFor,get,run,atomic,audit,can,documentAccess,fixtureDXF,fixturePDF,limit,findContent,secret,hash,stamp} from './lib/db.mjs';
+import {userFor,get,run,atomic,audit,can,documentAccess,fixtureDXF,fixturePDF,limit,findContent,secret,hash,stamp,withDatabase} from './lib/db.mjs';
 import {action,submitInquiry,submitApplication} from './lib/actions.mjs';
 import {home,listing,detail,contact,legal,inquiry,application} from './lib/public.mjs';
 import {account,consolePage} from './lib/console.mjs';
@@ -272,7 +272,8 @@ class WorkerResponse extends Writable{
  writeHead(status,headers={}){this.statusCode=status;for(const [name,value] of Object.entries(headers))this.setHeader(name,value);this.sent=true;return this;}
  get headersSent(){return this.sent;}
 }
-export async function handleCloudflareRequest(request){
+export async function handleCloudflareRequest(request,databaseContext){
+ return withDatabase(databaseContext,async()=>{
  const url=new URL(request.url),headers={};request.headers.forEach((value,name)=>headers[name.toLowerCase()]=value);
  const body=request.body?Readable.from((async function*(){const reader=request.body.getReader();try{while(true){const {done,value}=await reader.read();if(done)break;yield Buffer.from(value);}}finally{reader.releaseLock();}})()):Readable.from([]);
  const req=Object.assign(body,{method:request.method,url:url.pathname+url.search,headers,socket:{remoteAddress:headers['cf-connecting-ip']||'cloudflare'}});
@@ -280,6 +281,7 @@ export async function handleCloudflareRequest(request){
  await handleNodeRequest(req,res);
  if(!res.writableFinished)await finished;
  return new Response(Buffer.concat(res.chunks),{status:res.statusCode,headers:res.headers});
+ });
 }
 if(!cloudflareRuntime)server.maxConnections=32;
 if(!cloudflareRuntime)server.listen(port,host,()=>console.log('KLAUS · Local website: http://'+host+':'+port+'/de'));

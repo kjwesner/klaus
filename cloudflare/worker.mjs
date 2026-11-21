@@ -47,9 +47,10 @@ export class KlausApplication extends DurableObject {
 
   async fetch(request) {
     await this.ready;
-    this.sqlite.rebind(this.ctx.storage.sql);
-    this.atomicContext = this.ctx;
-    return this.handleRequest(request);
+    return this.handleRequest(request, {
+      db: sqliteAdapter(this.ctx.storage.sql),
+      atomic: callback => this.ctx.storage.transactionSync(callback),
+    });
   }
 }
 
