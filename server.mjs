@@ -249,7 +249,7 @@ async function handleNodeRequest(req,res){
    if(a==='setup')return configured?redirect(res,'/'+l+'/verwaltung'):html(account(l,section,'setup'),200,true);
    if(!user||user.id.startsWith('demo-')){if(user?.id.startsWith('demo-'))res.setHeader('Set-Cookie',cookie('',0));return html(account(l,section),200,true);}
    if(user.role==='customer')return a?redirect(res,'/'+l+'/'+section):html(account(l,section),200,true);
-   if(c&&a!=='cms')gone();
+   if(c&&!['cms','karriere','website-projekte'].includes(a))gone();
    return html(consolePage(l,user,internal,[a,b,c],parsed.searchParams),200,true);
   }
   const p=!a&&findContent('page',section);if(p)return html(detail(l,p));
